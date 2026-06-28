@@ -51,7 +51,6 @@ const path = require('path');
 const crypto = require('crypto');
 const tls = require('tls');
 const { once } = require('events');
-const { fileURLToPath } = require('url');
 const { analyzePodcastDjStream, analyzePodcastDjIntro } = require('./dj-analyzer');
 
 const PORT = process.env.PORT || 3000;
@@ -63,9 +62,27 @@ const UPDATE_WORK_DIR = process.env.MINERADIO_UPDATE_DIR || path.join(__dirname,
 const UPDATE_DOWNLOAD_DIR = process.env.MINERADIO_UPDATE_DOWNLOAD_DIR || path.join(UPDATE_WORK_DIR, 'downloads');
 const UPDATE_PATCH_BACKUP_DIR = process.env.MINERADIO_PATCH_BACKUP_DIR || path.join(UPDATE_WORK_DIR, 'backups', 'patches');
 const BEATMAP_CACHE_DIR = process.env.MINERADIO_BEAT_CACHE_DIR || 'D:\\MineradioCache\\beatmaps';
-const APP_PACKAGE = readPackageInfo();
-const APP_VERSION = process.env.MINERADIO_VERSION || APP_PACKAGE.version || '0.9.11';
-const UPDATE_CONFIG = readUpdateConfig(APP_PACKAGE);
+
+// ★ 性能优化: 延迟加载非关键配置，避免同步 I/O 阻塞模块加载
+let APP_PACKAGE = null;
+let APP_VERSION = null;
+let UPDATE_CONFIG = null;
+function lazyReadPackageInfo() {
+  if (!APP_PACKAGE) {
+    APP_PACKAGE = readPackageInfo();
+    APP_VERSION = process.env.MINERADIO_VERSION || APP_PACKAGE.version || '0.9.11';
+    UPDATE_CONFIG = readUpdateConfig(APP_PACKAGE);
+  }
+  return APP_PACKAGE;
+}
+function getAppVersion() {
+  lazyReadPackageInfo();
+  return APP_VERSION;
+}
+function getUpdateConfig() {
+  lazyReadPackageInfo();
+  return UPDATE_CONFIG;
+}
 const PATCH_MAX_BYTES = 12 * 1024 * 1024;
 const PATCH_ALLOWED_ROOTS = new Set(['public', 'desktop', 'build']);
 const PATCH_ALLOWED_FILES = new Set(['server.js', 'dj-analyzer.js', 'package.json', 'package-lock.json']);
@@ -106,7 +123,8 @@ function applySystemCertificateAuthorities() {
   }
 }
 
-applySystemCertificateAuthorities();
+// ★ 性能优化: 延迟到服务器启动时再加载系统 CA 证书，避免同步阻塞模块加载
+// applySystemCertificateAuthorities();
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -4192,6 +4210,9 @@ const server = http.createServer(async (req, res) => {
   filePath = path.join(__dirname, 'public', filePath);
   serveStatic(res, filePath);
 });
+
+// ★ 性能优化: 延迟到服务器启动前同步加载，不影响 Electron 主进程并行启动
+applySystemCertificateAuthorities();
 
 server.listen(PORT, HOST, () => {
   console.log('======================================================');
